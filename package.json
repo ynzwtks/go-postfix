@@ -2,11 +2,11 @@
   "name": "go-postfix",
   "displayName": "Go Postfix Completion",
   "description": "Postfix completion extension for Go language. External definition file and Webview editing supported.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.99.0"
   },
-  "icon": "resources/icon.svg",
+  "icon": "resources/icon.png",
   "categories": [
     "Other"
   ],

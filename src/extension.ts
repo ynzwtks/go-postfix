@@ -79,68 +79,50 @@ class GoPostfixCompletionProvider implements vscode.CompletionItemProvider {
     ): vscode.CompletionItem[] | Thenable<vscode.CompletionItem[]> {
         const line = document.lineAt(position).text.substring(0, position.character);
 
-        // インデント取得
-        const indentMatch = line.match(/^(\s*)/);
-        const indent = indentMatch ? indentMatch[1] : '';
-
         const items: vscode.CompletionItem[] = [];
 
         for (const def of this.definitions) {
             const dotIndex = line.lastIndexOf('.');
             if (dotIndex === -1) continue;
-            // Get the exact expression before the dot
+
             const expr = line.substring(0, dotIndex);
             const typed = line.substring(dotIndex + 1, position.character);
-            if (def.postfix.startsWith(typed)) {
-                // 1. 先頭の空白/タブを抽出
-                const leadingWhitespaceMatch = expr.match(/^(\s+)/);
-                const leadingWhitespace = leadingWhitespaceMatch ? leadingWhitespaceMatch[1] : '';
-                
-                // 2. 実際の式部分（空白/タブを除く）
-                const cleanExpr = expr.replace(/^\s+/, '').replace(/\s+$/, '');
-                
-                // タブが含まれているかチェック
-                const hasTab = cleanExpr.includes('\t');
-                const tabPositions = [];
-                for (let i = 0; i < cleanExpr.length; i++) {
-                    if (cleanExpr[i] === '\t') {
-                        tabPositions.push(i);
-                    }
-                }
-                
-                // 末尾の空白のみを削除し、元の式の形を維持
-                const exprPreserved = expr.replace(/\s+$/, '');
-                
-                // テンプレート内の${expr}をそのまま置換（空白を追加しない）
-                let insertText = def.template.replace(/\$\{expr\}/g, cleanExpr);
-                
-                // 全ての行（1行目含む）に適切なインデントを追加
-                if (insertText.includes('\n')) {
-                    const lines = insertText.split('\n');
-                    // すべての行にインデントを追加
-                    insertText = lines.map(l => indent + l).join('\n');
-                } else {
-                    // 単一行の場合も同様にインデントを追加
-                    insertText = indent + insertText;
-                }
-                
-                const item = new vscode.CompletionItem(def.postfix, vscode.CompletionItemKind.Snippet);
-                item.detail = def.description || insertText.replace(/\n/g, ' ').slice(0, 80);
-                item.documentation = new vscode.MarkdownString(
-                    `**Preview:**\n\n\`\`\`go\n${insertText}\n\`\`\``
-                );
-                item.insertText = new vscode.SnippetString(insertText);
-                const startCharacter = line.length - (expr.length + typed.length + 1); // +1 for '.'
-                item.range = new vscode.Range(
-                    position.line,
-                    startCharacter,
-                    position.line,
-                    position.character
-                );
-                item.filterText = line;
-                item.preselect = true;
-                items.push(item);
+            if (!def.postfix.startsWith(typed)) continue;
+
+            const indentMatch = expr.match(/^(\s*)/);
+            const indent = indentMatch ? indentMatch[1] : '';
+            const cleanExpr = expr.trim();
+
+            let insertText = def.template.replace(/\$\{expr\}/g, cleanExpr);
+            if (insertText.includes('\n')) {
+                insertText = insertText
+                    .split('\n')
+                    .map(l => indent + l)
+                    .join('\n');
+            } else {
+                insertText = indent + insertText;
             }
+
+            const fullLabel = `${cleanExpr}.${def.postfix}`;
+            const item = new vscode.CompletionItem(fullLabel, vscode.CompletionItemKind.Snippet);
+            item.detail = def.description || insertText.replace(/\n/g, ' ').slice(0, 80);
+            item.documentation = new vscode.MarkdownString(`**Preview:**\n\n\`\`\`go\n${insertText}\n\`\`\``);
+            item.insertText = new vscode.SnippetString(insertText);
+
+            const startCharacter = line.length - (expr.length + typed.length + 1);
+            item.range = new vscode.Range(
+                position.line,
+                startCharacter,
+                position.line,
+                position.character
+            );
+
+            item.filterText = fullLabel;
+            item.preselect = true;
+            item.sortText = '0000' + def.postfix;
+            item.commitCharacters = [' ', '\t', '(', ')', '[', ']', '{', '}', ',', ';', ':']; // '.' を除外
+
+            items.push(item);
         }
 
         return items;
