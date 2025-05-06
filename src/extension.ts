@@ -10,9 +10,21 @@ interface PostfixDefinition {
     template: string;
 }
 
-function getDefaultPostfixDefinitions(): PostfixDefinition[] {
+function getDefaultPostfixDefinitions(context: vscode.ExtensionContext): PostfixDefinition[] {
+    // assets/gopostfix.default.jsonからデフォルト定義を読み込む
+    const defaultJsonPath = path.join(context.extensionPath, 'src', 'assets', 'gopostfix.default.json');
+    try {
+        if (fs.existsSync(defaultJsonPath)) {
+            const defaultDefs = JSON.parse(fs.readFileSync(defaultJsonPath, 'utf8'));
+            return defaultDefs;
+        }
+    } catch (error) {
+        // エラーが発生した場合は静かに失敗
+    }
+
+    // ファイル読み込みに失敗した場合はハードコードされたデフォルト定義を使用
     return [
-        { postfix: 'ap', description: 'append', template: '${expr} = append(${expr}, )' },
+        { postfix: 'app', description: 'append', template: '${expr} = append(${expr}, )' },
         { postfix: 'flen', description: 'for len loop', template: 'for i:=0;i<len(${expr});i++{}' },
         { postfix: 'nil', description: 'nil check', template: 'if ${expr} == nil {}' },
         { postfix: 'notnil', description: 'not nil check', template: 'if ${expr} != nil {}' },
@@ -22,7 +34,7 @@ function getDefaultPostfixDefinitions(): PostfixDefinition[] {
 }
 
 function loadPostfixDefinitions(context: vscode.ExtensionContext): PostfixDefinition[] {
-    // Always open the editor UI when referencing .vscode/gopostfix.json
+    // 定義ファイルの読み込みのみを行い、編集画面は表示しない
     const workspaceFolders = vscode.workspace.workspaceFolders;
     let defPath = '';
     if (workspaceFolders && workspaceFolders.length > 0) {
@@ -30,37 +42,28 @@ function loadPostfixDefinitions(context: vscode.ExtensionContext): PostfixDefini
     } else {
         defPath = path.join(context.extensionPath, '.vscode', 'gopostfix.json');
     }
-    let defs = [];
+    
+    // 設定ファイルが存在しない場合はデフォルト設定で作成
     if (!fs.existsSync(defPath)) {
         // Create file with default definitions if not exists
-        const defaultDefs = getDefaultPostfixDefinitions();
+        const defaultDefs = getDefaultPostfixDefinitions(context);
         fs.mkdirSync(path.dirname(defPath), { recursive: true });
         fs.writeFileSync(defPath, JSON.stringify(defaultDefs, null, 2), 'utf8');
         return defaultDefs;
     }
+    
+    // 設定ファイルが存在する場合は読み込む
     if (fs.existsSync(defPath)) {
-        defs = JSON.parse(fs.readFileSync(defPath, 'utf8'));
-    }
-    const panel = vscode.window.createWebviewPanel(
-        'gopostfixEdit',
-        'Go Postfix Definition Editor',
-        vscode.ViewColumn.One,
-        { enableScripts: true }
-    );
-    panel.webview.html = getWebviewContent(defs);
-    panel.webview.onDidReceiveMessage(async msg => {
-        if (msg.type === 'save' && Array.isArray(msg.data)) {
-            fs.writeFileSync(defPath, JSON.stringify(msg.data, null, 2), 'utf8');
-            vscode.window.showInformationMessage('gopostfix.json has been saved');
-            registerGoPostfixProvider(context); // Re-register provider on save
-            // Reload Webview with latest definitions
-            const latestDefs = JSON.parse(fs.readFileSync(defPath, 'utf8'));
-            panel.webview.html = getWebviewContent(latestDefs);
-        } else if (msg.type === 'close') {
-            panel.dispose();
+        try {
+            const defs = JSON.parse(fs.readFileSync(defPath, 'utf8'));
+            return defs;
+        } catch (error) {
+            vscode.window.showErrorMessage('gopostfix.jsonの解析に失敗しました: ' + error);
+            return getDefaultPostfixDefinitions(context);
         }
-    });
-    return defs;
+    }
+    
+    return getDefaultPostfixDefinitions(context);
 }
 
 class GoPostfixCompletionProvider implements vscode.CompletionItemProvider {
@@ -76,28 +79,57 @@ class GoPostfixCompletionProvider implements vscode.CompletionItemProvider {
     ): vscode.CompletionItem[] | Thenable<vscode.CompletionItem[]> {
         const line = document.lineAt(position).text.substring(0, position.character);
 
+        // インデント取得
+        const indentMatch = line.match(/^(\s*)/);
+        const indent = indentMatch ? indentMatch[1] : '';
+
         const items: vscode.CompletionItem[] = [];
 
         for (const def of this.definitions) {
             const dotIndex = line.lastIndexOf('.');
             if (dotIndex === -1) continue;
-
-            const expr = line.substring(0, dotIndex).trim();
+            // Get the exact expression before the dot
+            const expr = line.substring(0, dotIndex);
             const typed = line.substring(dotIndex + 1, position.character);
-
             if (def.postfix.startsWith(typed)) {
-                const insertText = def.template.replace(/\$\{expr\}/g, expr);
-
+                // 1. 先頭の空白/タブを抽出
+                const leadingWhitespaceMatch = expr.match(/^(\s+)/);
+                const leadingWhitespace = leadingWhitespaceMatch ? leadingWhitespaceMatch[1] : '';
+                
+                // 2. 実際の式部分（空白/タブを除く）
+                const cleanExpr = expr.replace(/^\s+/, '').replace(/\s+$/, '');
+                
+                // タブが含まれているかチェック
+                const hasTab = cleanExpr.includes('\t');
+                const tabPositions = [];
+                for (let i = 0; i < cleanExpr.length; i++) {
+                    if (cleanExpr[i] === '\t') {
+                        tabPositions.push(i);
+                    }
+                }
+                
+                // 末尾の空白のみを削除し、元の式の形を維持
+                const exprPreserved = expr.replace(/\s+$/, '');
+                
+                // テンプレート内の${expr}をそのまま置換（空白を追加しない）
+                let insertText = def.template.replace(/\$\{expr\}/g, cleanExpr);
+                
+                // 全ての行（1行目含む）に適切なインデントを追加
+                if (insertText.includes('\n')) {
+                    const lines = insertText.split('\n');
+                    // すべての行にインデントを追加
+                    insertText = lines.map(l => indent + l).join('\n');
+                } else {
+                    // 単一行の場合も同様にインデントを追加
+                    insertText = indent + insertText;
+                }
+                
                 const item = new vscode.CompletionItem(def.postfix, vscode.CompletionItemKind.Snippet);
-
                 item.detail = def.description || insertText.replace(/\n/g, ' ').slice(0, 80);
-
                 item.documentation = new vscode.MarkdownString(
                     `**Preview:**\n\n\`\`\`go\n${insertText}\n\`\`\``
                 );
-
                 item.insertText = new vscode.SnippetString(insertText);
-
                 const startCharacter = line.length - (expr.length + typed.length + 1); // +1 for '.'
                 item.range = new vscode.Range(
                     position.line,
@@ -105,7 +137,6 @@ class GoPostfixCompletionProvider implements vscode.CompletionItemProvider {
                     position.line,
                     position.character
                 );
-
                 item.filterText = line;
                 item.preselect = true;
                 items.push(item);
@@ -135,6 +166,26 @@ function registerGoPostfixProvider(context: vscode.ExtensionContext) {
 export function activate(context: vscode.ExtensionContext) {
     // Register provider with the latest definitions on activation
     registerGoPostfixProvider(context);
+
+    // ファイルシステムの監視を設定
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        const configPath = path.join(workspaceFolders[0].uri.fsPath, '.vscode', 'gopostfix.json');
+        const fileWatcher = vscode.workspace.createFileSystemWatcher(configPath);
+        
+        // ファイルが変更された時に定義を再読み込み
+        fileWatcher.onDidChange(() => {
+            vscode.window.showInformationMessage('Gopostfix 定義ファイルが更新されました');
+            registerGoPostfixProvider(context);
+        });
+        
+        // ファイルが作成された時も定義を読み込み
+        fileWatcher.onDidCreate(() => {
+            registerGoPostfixProvider(context);
+        });
+        
+        context.subscriptions.push(fileWatcher);
+    }
 
     const disposable = vscode.commands.registerCommand('go-postfix.helloWorld', () => {
         vscode.window.showInformationMessage('Hello World from Go Postfix Completion!');

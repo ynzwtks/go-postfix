@@ -25,7 +25,17 @@ A Visual Studio Code extension that provides postfix completion for the Go langu
   {
     "postfix": "flen",
     "description": "for len loop",
-    "template": "for i:=0;i<len(${expr});i++{}"
+    "template": "for i:=0;i<len(${expr});i++"
+  },
+  {
+    "postfix": "nil",
+    "description": "nil check",
+    "template": "if ${expr} == nil {}"
+  },
+  {
+    "postfix": "err",
+    "description": "error check",
+    "template": "if err := ${expr}; err != nil {\n\treturn err\n}"
   }
 ]
 ```

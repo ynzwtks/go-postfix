@@ -6,11 +6,15 @@
   "engines": {
     "vscode": "^1.99.0"
   },
+  "icon": "resources/icon.svg",
   "categories": [
     "Other"
   ],
   "publisher":"ynzwtks",
-  "activationEvents": [ "go-postfix.editDefinitions"],
+  "activationEvents": [
+    "onLanguage:go",
+    "go-postfix.editDefinitions"
+  ],
   "main": "./out/extension.js",
   "repository": {
     "type": "git",

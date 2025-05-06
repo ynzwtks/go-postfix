@@ -1,13 +1,13 @@
 [
     {
-      "postfix": "ap",
+      "postfix": "app",
       "description": "append",
-      "template": "${expr} = append(${expr}, )"
+      "template": "${expr} = append(${expr},$0)"
     },
     {
-      "postfix": "flen",
-      "description": "for len loop",
-      "template": "for i:=0;i<len(${expr});i++{}"
+      "postfix": "forlen",
+      "description": "for loop",
+      "template": "for i:=0;i<len(${expr});i++{\n\t$0\n}"
     },
     {
       "postfix": "nil",
